@@ -1,11 +1,26 @@
 #include <WiFi.h>                                               
-#include <IOXhop_FirebaseESP32.h>                                            
+#include <IOXhop_FirebaseESP32.h> 
+#include <Servo.h>   
+#include <Adafruit_AHTX0.h>                                     
 
 //WIFI - FIREBASE - SETTINGS
   #define FIREBASE_HOST "https://teste-casa-4d9fb-default-rtdb.firebaseio.com/"                      
   #define FIREBASE_AUTH "AIzaSyBSY4AEXaK-DsLq3CMcKzZFxWkSMdcbMgw"                   
   #define WIFI_SSID "2GClaroAp202"                                         
-  #define WIFI_PASSWORD "vlmrap202"  
+  #define WIFI_PASSWORD "vlmrap202" 
+  unsigned long lastReadTime = 0;
+  unsigned long readInterval = 5000;  
+
+//SERVO
+  Servo servo1;
+  String door = "";  
+  int pos = 0; 
+
+//AHTX10 - HUM - TEMP
+  float temperature = 0.0;
+  float humidity = 0.0;
+  float aht_old_temp;
+  float aht_old_humidity;
 
 //FIREBASE - DATA
   String fireLed1 = "";                                                     
@@ -17,15 +32,25 @@
   String fireLed4 = "";    
   int led4 = 32;                                                                
 
+//AHT 10
+  Adafruit_AHTX0 aht;
+  Adafruit_Sensor *aht_humidity, *aht_temp;
+
 void setup() {
   Serial.begin(115200);
   delay(500);
-
+    
   //OUTPUTS
     pinMode(26, OUTPUT); 
     pinMode(25, OUTPUT);
     pinMode(33, OUTPUT);
     pinMode(32, OUTPUT);    
+
+  //LED'S
+    digitalWrite(led1, LOW);
+    digitalWrite(led2, LOW);
+    digitalWrite(led3, LOW);
+    digitalWrite(led4, LOW);
 
   //WIFI
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);                                   
@@ -40,48 +65,114 @@ void setup() {
     Serial.println(WIFI_SSID);
     Serial.println("IP Address is : ");
     Serial.println(WiFi.localIP()); 
-
+    
   //FIREBASE                                                  
-    Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);                                   
+    Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);   
+
+  // Initialize AHT sensor
+    if (!aht.begin()) {
+      Serial.println("Failed to find AHT10/AHT20 chip");
+      while (1) {
+        delay(10);
+      }
+    }  
+  Serial.println("AHT10/AHT20 Found!");
+  aht_temp = aht.getTemperatureSensor();
+  aht_humidity = aht.getHumiditySensor(); 
+                 
 }
 
-void loop() {
+void loop() { 
 
-  //CHECK FIREBASE DATA     
-    // Check Firebase data for LED 1
-    fireLed1 = Firebase.getString("led1");
-    if (fireLed1 == "ON") {                     
-      Serial.println("LED 1 Turned ON");                 
-      digitalWrite(led1, HIGH);                                                        
-    } else {             
-      Serial.println("LED 1 Turned OFF");
-      digitalWrite(led1, LOW);                                                       
+  //CHECK TEMP HUM DATA
+    sensors_event_t humidity;
+    sensors_event_t temp;
+    aht_humidity->getEvent(&humidity);
+    aht_temp->getEvent(&temp);
+    Serial.println("-Sensor terperature: " + String(temp.temperature));
+    Serial.println("-Sensor humidity: " + String(humidity.relative_humidity));
+    if (int(aht_old_temp) != int(temp.temperature)) {
+      aht_temp->getEvent(&temp);
+      Firebase.setString("temp", String(temp.temperature));
+      Serial.println("-Updated temperature");
     }
-    // Check Firebase data for LED 2
-    fireLed2 = Firebase.getString("led2");
-    if (fireLed2 == "ON") {                     
-      Serial.println("LED 2 Turned ON");                 
-      digitalWrite(led2, HIGH);                                                        
-    } else {             
-      Serial.println("LED 2 Turned OFF");
-      digitalWrite(led2, LOW);                                                       
+    if (int(aht_old_humidity) != int(humidity.relative_humidity)) {
+      aht_humidity->getEvent(&humidity);
+      Firebase.setString("hum", String(humidity.relative_humidity));
+      Serial.println("-Updated humidity");
     }
-    // Check Firebase data for LED 3
-    fireLed3 = Firebase.getString("led3");
-    if (fireLed3 == "ON") {                     
-      Serial.println("LED 3 Turned ON");                 
-      digitalWrite(led3, HIGH);                                                        
-    } else {             
-      Serial.println("LED 3 Turned OFF");
-      digitalWrite(led3, LOW);                                                       
-    }
-    // Check Firebase data for LED 4
-    fireLed4 = Firebase.getString("led4");
-    if (fireLed4 == "ON") {                     
-      Serial.println("LED 4 Turned ON");                 
-      digitalWrite(led4, HIGH);                                                        
-    } else {             
-      Serial.println("LED 4 Turned OFF");
-      digitalWrite(led4, LOW);                                                       
+    aht_old_temp = temp.temperature;
+    aht_old_humidity = humidity.relative_humidity;
+
+
+  //CHECK FIREBASE    
+    // Check if it's time to read from Firebase
+    Serial.println("\n===ESP32-CICLE===\n-Firebase Request: ");
+    if (millis() - lastReadTime > readInterval) {
+      //CHECK DOORS
+        if (door != Firebase.getString("door")) {
+          servo1.attach(13);
+          door = Firebase.getString("door");
+          Serial.println("door: "+door);
+          if (door == "ON") {        
+            for (pos = 0; pos <= 90; pos++) { // goes from 0 degrees to 180 degrees
+              // in steps of 1 degree
+              servo1.write(pos);    // tell servo to go to position in variable 'pos'
+              delay(15);             // waits 15ms for the servo to reach the position
+              Serial.println(pos);
+            }                                                  
+          } else { 
+            for (pos = 90; pos >= 0; pos--) { // goes from 180 degrees to 0 degrees
+              servo1.write(pos);    // tell servo to go to position in variable 'pos'
+              delay(15);   
+              Serial.println(pos);          // waits 15ms for the servo to reach the position
+            }                                                            
+          }
+          servo1.detach();
+        }
+
+      //CHECK LIGHT
+        lastReadTime = millis();
+        if (fireLed1 != Firebase.getString("led1")) {
+          fireLed1 = Firebase.getString("led1");
+          if (fireLed1 == "ON") {                     
+            Serial.print(" Led1-ON");                 
+            digitalWrite(led1, HIGH);                                                        
+          } else {             
+            Serial.print(" Led1-OFF");
+            digitalWrite(led1, LOW);                                                       
+          }
+        }
+        if (fireLed2 != Firebase.getString("led2")) {
+          fireLed2 = Firebase.getString("led2");
+          if (fireLed2 == "ON") {                     
+            Serial.print(" Led2-ON");                 
+            digitalWrite(led2, HIGH);                                                        
+          } else {             
+            Serial.print(" Led2-OFF");
+            digitalWrite(led2, LOW);                                                       
+          }
+        }
+        if (fireLed3 != Firebase.getString("led3")) {
+          fireLed3 = Firebase.getString("led3");
+          if (fireLed3 == "ON") {                     
+            Serial.print(" Led3-ON");                 
+            digitalWrite(led3, HIGH);                                                        
+          } else {             
+            Serial.print(" Led3-OFF");
+            digitalWrite(led3, LOW);                                                       
+          }
+        }
+        if (fireLed4 != Firebase.getString("led4")) {
+          fireLed4 = Firebase.getString("led4");
+          if (fireLed4 == "ON") {                     
+            Serial.println(" Led4-ON");                 
+            digitalWrite(led4, HIGH);                                                        
+          } else {             
+            Serial.println(" Led4-OFF");
+            digitalWrite(led4, LOW);                                                       
+          }
+        }  
+      delay(500);
     }
 }
