@@ -1,7 +1,7 @@
 #include <WiFi.h>                                               
 #include <IOXhop_FirebaseESP32.h> 
 #include <Servo.h>   
-#include <Adafruit_AHTX0.h>                                     
+#include <Adafruit_AHTX0.h>  
 
 //WIFI - FIREBASE - SETTINGS
   #define FIREBASE_HOST "https://teste-casa-4d9fb-default-rtdb.firebaseio.com/"                      
@@ -12,9 +12,10 @@
   unsigned long readInterval = 5000;  
 
 //SERVO
-  Servo servo1;
-  String door = "";  
+  Servo s1;
+  String door;  
   int pos = 0; 
+  int x;
 
 //AHTX10 - HUM - TEMP
   float temperature = 0.0;
@@ -35,11 +36,16 @@
 //AHT 10
   Adafruit_AHTX0 aht;
   Adafruit_Sensor *aht_humidity, *aht_temp;
-
-void setup() {
+void setup() 
+{
   Serial.begin(115200);
   delay(500);
-    
+
+  //SERVO
+    s1.attach(13);
+    // Initially the servo must be stopped 
+    s1.write(90);
+
   //OUTPUTS
     pinMode(26, OUTPUT); 
     pinMode(25, OUTPUT);
@@ -65,9 +71,9 @@ void setup() {
     Serial.println(WIFI_SSID);
     Serial.println("IP Address is : ");
     Serial.println(WiFi.localIP()); 
-    
+
   //FIREBASE                                                  
-    Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);   
+    Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);  
 
   // Initialize AHT sensor
     if (!aht.begin()) {
@@ -76,14 +82,14 @@ void setup() {
         delay(10);
       }
     }  
-  Serial.println("AHT10/AHT20 Found!");
-  aht_temp = aht.getTemperatureSensor();
-  aht_humidity = aht.getHumiditySensor(); 
-                 
+    Serial.println("AHT10/AHT20 Found!");
+    aht_temp = aht.getTemperatureSensor();
+    aht_humidity = aht.getHumiditySensor();  
+    door = Firebase.getString("door"); 
 }
 
-void loop() { 
-
+void loop() 
+{
   //CHECK TEMP HUM DATA
     sensors_event_t humidity;
     sensors_event_t temp;
@@ -104,34 +110,31 @@ void loop() {
     aht_old_temp = temp.temperature;
     aht_old_humidity = humidity.relative_humidity;
 
-
-  //CHECK FIREBASE    
-    // Check if it's time to read from Firebase
-    Serial.println("\n===ESP32-CICLE===\n-Firebase Request: ");
-    if (millis() - lastReadTime > readInterval) {
-      //CHECK DOORS
+    //CHECK FIREBASE    
+      // Check if it's time to read from Firebase
+      Serial.println("\n===ESP32-CICLE===\n-Firebase Request: ");
+        //CHECK DOORS
         if (door != Firebase.getString("door")) {
-          servo1.attach(13);
-          door = Firebase.getString("door");
-          Serial.println("door: "+door);
-          if (door == "ON") {        
-            for (pos = 0; pos <= 90; pos++) { // goes from 0 degrees to 180 degrees
-              // in steps of 1 degree
-              servo1.write(pos);    // tell servo to go to position in variable 'pos'
-              delay(15);             // waits 15ms for the servo to reach the position
-              Serial.println(pos);
-            }                                                  
-          } else { 
-            for (pos = 90; pos >= 0; pos--) { // goes from 180 degrees to 0 degrees
-              servo1.write(pos);    // tell servo to go to position in variable 'pos'
-              delay(15);   
-              Serial.println(pos);          // waits 15ms for the servo to reach the position
-            }                                                            
+          door = Firebase.getString("door");         
+          if (door == "ON") {
+            // Start turning clockwise
+            s1.write(0);
+            // Go on turning for the right duration
+            delay(300);
+            // Stop turnings
+            s1.write(90);                                                      
           }
-          servo1.detach();
+          if (door == "OFF") { 
+            // Start turning clockwise
+            s1.write(100);
+            // Go on turning for the right duration
+            delay(300);
+            // Stop turning
+            s1.write(90);                                                        
+          }
         }
 
-      //CHECK LIGHT
+        //CHECK LIGHT
         lastReadTime = millis();
         if (fireLed1 != Firebase.getString("led1")) {
           fireLed1 = Firebase.getString("led1");
@@ -173,6 +176,4 @@ void loop() {
             digitalWrite(led4, LOW);                                                       
           }
         }  
-      delay(500);
-    }
 }
